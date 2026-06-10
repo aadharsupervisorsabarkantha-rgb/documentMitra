@@ -1,0 +1,178 @@
+{
+  "app_name": "Pramanik - Gov Doc Verifier",
+  "personality": "1 iOS-Native Clean tailored for trustworthy utility",
+  "personality_one_liner": "A trustworthy, highly readable, and friendly verification guide that bridges the gap between complex official processes and the common citizen.",
+  "color": {
+    "surface": "#FAFAF9",
+    "onSurface": "#1C1C1A",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1C1C1A",
+    "surfaceTertiary": "#F0F0EE",
+    "onSurfaceTertiary": "#4A4A46",
+    "surfaceInverse": "#1C1C1A",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#1E5631",
+    "brandPrimary": "#1E5631",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#4C7D5B",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#E8F0EA",
+    "onBrandTertiary": "#1E5631",
+    "success": "#2E7D32",
+    "onSuccess": "#FFFFFF",
+    "warning": "#ED6C02",
+    "onWarning": "#FFFFFF",
+    "error": "#D32F2F",
+    "onError": "#FFFFFF",
+    "info": "#1E5631",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E5E0",
+    "borderStrong": "#C2C2BB",
+    "divider": "#E5E5E0",
+    "dark_surface": "#121212",
+    "dark_onSurface": "#E0E0E0",
+    "dark_surfaceSecondary": "#1E1E1E",
+    "dark_onSurfaceSecondary": "#E0E0E0",
+    "dark_surfaceTertiary": "#2C2C2C",
+    "dark_onSurfaceTertiary": "#A0A0A0",
+    "dark_surfaceInverse": "#FAFAF9",
+    "dark_onSurfaceInverse": "#1C1C1A",
+    "dark_brandPrimary": "#4C7D5B",
+    "dark_onBrandPrimary": "#FFFFFF",
+    "dark_brandSecondary": "#6B9B79",
+    "dark_onBrandSecondary": "#FFFFFF",
+    "dark_brandTertiary": "#1B2A20",
+    "dark_onBrandTertiary": "#6B9B79"
+  },
+  "typography": {
+    "displayFontFamily": "DM Sans",
+    "textFontFamily": "DM Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous touch targets (min 44pt), padding around cards, and clear spacing between Gujarati and English texts.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use glass for the floating Premium Expert Call banner.",
+      "Use glass for the bottom tab bar if content scrolls behind it.",
+      "Use glass for the sticky CTA container at the bottom of the scanner modal."
+    ],
+    "dont's": [
+      "Do not use glass on dense data cards or document status chips.",
+      "Do not use glass on form inputs."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Welcome_Language",
+      "purpose": "First touchpoint allowing users to select their preferred language (English / ગુજરાતી).",
+      "states": {
+        "loading": "Centered spinner",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Full-bleed background image of a Gujarat landscape. Apply a top-to-bottom gradient scrim (transparent to surfaceInverse at 80% opacity). In the bottom 40% of the screen, place the App Title, a friendly subtitle, and two massive primary buttons (pill shape, brandPrimary) for English and ગુજરાતી."
+    },
+    {
+      "name": "Login",
+      "purpose": "OTP-based phone login.",
+      "states": {
+        "loading": "Spinner on the CTA button",
+        "empty": "N/A",
+        "error": "Red error text below input"
+      },
+      "layout": "Clean white layout. Top area: simple document/shield icon inside a brandTertiary circle. Middle: Large text input for phone number. Bottom: Sticky primary CTA button 'Send OTP' inside a KeyboardAvoidingView. Minimal distraction."
+    },
+    {
+      "name": "Dashboard",
+      "purpose": "Main hub showing document verification statuses and correction roadmap.",
+      "states": {
+        "loading": "Skeleton loaders for cards and roadmap",
+        "empty": "Empty state illustration of a blank document folder, prompting to select a Base Document",
+        "error": "Red banner with retry button"
+      },
+      "layout": "Top section: Base Document selector (Dropdown or prominent card) acting as 'Ultimate Truth'. Middle section: A 2-column grid or horizontal scroll of document cards (Aadhaar, PAN, Voter ID). Each card shows an icon, document name, and a prominent status pill (Green/Match, Red/Mismatch, Amber/Pending). Bottom section: 'Correction Roadmap' - a vertical stepper component showing step-by-step fixes. Floating above the bottom tab: A glassmorphic banner for 'Book Expert Call ₹29'."
+    },
+    {
+      "name": "Scanner_Upload",
+      "purpose": "Modal to scan, upload, or manually enter document details, with smart error detection.",
+      "states": {
+        "loading": "Processing scan overlay spinner",
+        "empty": "N/A",
+        "error": "Prominent red warning banner at the top showing mismatched document error in Gujarati/English."
+      },
+      "layout": "Presented as a full-screen modal. Header: Title and Close button. Below header: Smart Error Banner (hidden by default). Middle: Large dashed-border drop zone or live camera preview. Just below the drop zone: A toggle switch row 'Is this for a married lady? / શું આ પરણિત મહિલા માટે છે?' (if Aadhaar is selected). Bottom area: 3 distinct buttons stacked vertically - Primary for 'Camera Scan', Secondary for 'Gallery Upload', Tertiary (text only) for 'Manual Entry'."
+    }
+  ],
+  "images": {
+    "welcome_background": {
+      "url": "https://images.unsplash.com/photo-1723871568744-6f3733c152bd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwxfHxndWphcmF0JTIwbGFuZHNjYXBlJTIwbGFuZG1hcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4MTA5NzQ5OHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Gujarat stone architecture landscape"
+    },
+    "expert_advisor": {
+      "url": "https://images.unsplash.com/photo-1626863905121-3b0c0ed7b94c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBjdXN0b21lciUyMHNlcnZpY2UlMjBhZHZpc29yJTIwaGVhZHNldCUyMGZyaWVuZGx5fGVufDB8fHx8MTc4MTA5NzQ5OXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Friendly professional customer service advisor with headset"
+    },
+    "empty_documents": {
+      "url": "https://images.unsplash.com/photo-1648904803235-e0db84e93298?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwxfHxvZmZpY2lhbCUyMGRvY3VtZW50JTIwcGFwZXIlMjBmb2xkZXIlMjBlbXB0eSUyMGRlc2t8ZW58MHx8fHwxNzgxMDk3NDk4fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Empty document paper on desk"
+    }
+  },
+  "haptics": {
+    "events": {
+      "language_selected": "selection",
+      "otp_sent": "success",
+      "document_uploaded": "success",
+      "scan_error_mismatch": "error",
+      "tab_change": "selection",
+      "married_lady_toggled": "light",
+      "expert_call_booked": "success"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Bilingual Support: Use 'expo-font' to load 'Noto Sans Gujarati' (or similar robust Gujarati font). Any Text component rendering Gujarati strings MUST use this font family explicitly, while English strings use DM Sans. Ensure line heights accommodate the taller Gujarati script.",
+    "Banned Colors Compliance: No blues, indigos, or purples are used. The app relies on a trustworthy Forest Green (brandPrimary) and warm off-whites, satisfying the strict color bans while remaining official.",
+    "Image Scrim Rule: The Welcome_Language screen uses a background image. You MUST apply a vertical linear-gradient scrim (transparent to surfaceInverse at >=70% opacity) beneath the text to ensure WCAG AAA readability.",
+    "Status Hierarchy: Use the semantic colors strictly on the Dashboard. Green (success) for Match, Red (error) for Mismatch, Amber (warning) for Pending. These pills should be highly visible.",
+    "Touch Targets: Target demographic includes older citizens. Enforce minimum 44x44pt hitSlop on all interactive elements, especially the 'Married Lady' toggle and file upload buttons.",
+    "Sticky CTAs: On the Login and Scanner screens, primary action buttons must be sticky at the bottom within a KeyboardAvoidingView or fixed container, never buried beneath scrollable content.",
+    "Roadmap UI: Implement the correction roadmap as a vertical stepper. Use brandTertiary lines connecting the steps, with active steps highlighted in brandPrimary.",
+    "Error State: The Smart Document Type detection error ('આ પાન કાર્ડ નથી...') must be implemented as a prominent red banner at the top of the Scanner modal, triggering an 'error' haptic."
+  ]
+}
