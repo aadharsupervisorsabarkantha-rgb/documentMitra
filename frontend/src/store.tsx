@@ -9,6 +9,7 @@ type Profile = {
   user_id: string;
   base_doc_type: string | null;
   is_married_lady: boolean;
+  is_minor?: boolean;
   language?: string;
 };
 
@@ -19,6 +20,7 @@ type Doc = {
   dob?: string | null;
   doc_number?: string | null;
   father_name?: string | null;
+  mother_name?: string | null;
   surname?: string | null;
   first_name?: string | null;
   mode?: string;

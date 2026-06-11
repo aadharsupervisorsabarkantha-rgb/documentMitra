@@ -29,7 +29,10 @@ type RoadmapResp = {
   ready: boolean;
   base_doc_type: string | null;
   is_married_lady: boolean;
+  is_minor?: boolean;
   needs_husband_aadhaar: boolean;
+  needs_father_aadhaar?: boolean;
+  needs_mother_aadhaar?: boolean;
   statuses: Record<string, "match" | "mismatch" | "pending">;
   roadmap: RoadmapStep[];
 };
@@ -135,9 +138,29 @@ export default function Dashboard() {
             testID="married-lady-toggle"
             value={!!profile?.is_married_lady}
             onValueChange={onToggleML}
-            disabled={savingToggle}
+            disabled={savingToggle || !!profile?.is_minor}
             trackColor={{ false: colors.borderStrong, true: colors.brandSecondary }}
             thumbColor={profile?.is_married_lady ? colors.brand : "#FFF"}
+          />
+        </View>
+
+        {/* Minor Toggle */}
+        <View style={styles.toggleCard}>
+          <View style={{ flex: 1, paddingRight: spacing.md }}>
+            <Text style={styles.toggleTitle}>{t(lang, "minor_toggle")}</Text>
+            <Text style={styles.toggleHint}>{t(lang, "minor_hint")}</Text>
+          </View>
+          <Switch
+            testID="minor-toggle"
+            value={!!profile?.is_minor}
+            onValueChange={async (val) => {
+              setSavingToggle(true);
+              await updateProfile({ is_minor: val });
+              setSavingToggle(false);
+            }}
+            disabled={savingToggle || !!profile?.is_married_lady}
+            trackColor={{ false: colors.borderStrong, true: colors.brandSecondary }}
+            thumbColor={profile?.is_minor ? colors.brand : "#FFF"}
           />
         </View>
 
@@ -150,6 +173,12 @@ export default function Dashboard() {
 
         {/* Document Cards */}
         <Text style={styles.h2}>{t(lang, "documents")}</Text>
+        {profile?.is_minor && profile?.base_doc_type !== "birth" ? (
+          <View style={styles.noticeCard}>
+            <Ionicons name="warning" size={20} color={colors.warning} />
+            <Text style={styles.noticeText}>{t(lang, "minor_only_birth")}</Text>
+          </View>
+        ) : null}
         <View style={styles.cardGrid}>
           {ALL_DOC_CARDS.filter((d) => d !== profile?.base_doc_type).map((d) => {
             const status = road?.statuses?.[d] || "pending";
@@ -186,6 +215,62 @@ export default function Dashboard() {
                 <Text style={styles.pillText}>{t(lang, "status_pending")}</Text>
               </View>
             </Pressable>
+          ) : null}
+          {profile?.is_minor ? (
+            <>
+              <Pressable
+                testID="doc-card-father_aadhaar"
+                style={[styles.docCard, { borderColor: colors.warning, borderWidth: 1 }]}
+                onPress={() => router.push(`/scan/father_aadhaar` as any)}
+              >
+                <View style={styles.docIconWrap}>
+                  <Ionicons name="man" size={22} color={colors.brand} />
+                </View>
+                <Text style={styles.docTitle}>{t(lang, "father_aadhaar")}</Text>
+                <View style={[
+                  styles.pill,
+                  road?.statuses?.father_aadhaar === "match"
+                    ? styles.pillMatch
+                    : road?.statuses?.father_aadhaar === "mismatch"
+                    ? styles.pillMismatch
+                    : styles.pillPending,
+                ]}>
+                  <Text style={styles.pillText}>
+                    {road?.statuses?.father_aadhaar === "match"
+                      ? t(lang, "status_match")
+                      : road?.statuses?.father_aadhaar === "mismatch"
+                      ? t(lang, "status_mismatch")
+                      : t(lang, "status_pending")}
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                testID="doc-card-mother_aadhaar"
+                style={[styles.docCard, { borderColor: colors.warning, borderWidth: 1 }]}
+                onPress={() => router.push(`/scan/mother_aadhaar` as any)}
+              >
+                <View style={styles.docIconWrap}>
+                  <Ionicons name="woman" size={22} color={colors.brand} />
+                </View>
+                <Text style={styles.docTitle}>{t(lang, "mother_aadhaar")}</Text>
+                <View style={[
+                  styles.pill,
+                  road?.statuses?.mother_aadhaar === "match"
+                    ? styles.pillMatch
+                    : road?.statuses?.mother_aadhaar === "mismatch"
+                    ? styles.pillMismatch
+                    : styles.pillPending,
+                ]}>
+                  <Text style={styles.pillText}>
+                    {road?.statuses?.mother_aadhaar === "match"
+                      ? t(lang, "status_match")
+                      : road?.statuses?.mother_aadhaar === "mismatch"
+                      ? t(lang, "status_mismatch")
+                      : t(lang, "status_pending")}
+                  </Text>
+                </View>
+              </Pressable>
+            </>
           ) : null}
         </View>
 

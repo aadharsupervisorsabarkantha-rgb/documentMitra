@@ -1,10 +1,10 @@
 export type Lang = "en" | "gu";
 
 export const STRINGS = {
-  app_name: { en: "Pramanik", gu: "પ્રમાણિક" },
+  app_name: { en: "DocumentMitra", gu: "ડોક્યુમેન્ટ મિત્ર" },
   app_tagline: {
-    en: "Verify & correct your documents — the smart way",
-    gu: "દસ્તાવેજો ચકાસો અને સુધારો — સ્માર્ટ રીતે",
+    en: "Your document verification & correction companion",
+    gu: "દસ્તાવેજ ચકાસણી અને સુધારાનો તમારો સાથી",
   },
   choose_language: { en: "Choose your language", gu: "તમારી ભાષા પસંદ કરો" },
   continue_english: { en: "Continue in English", gu: "Continue in English" },
@@ -37,6 +37,9 @@ export const STRINGS = {
   pan: { en: "PAN Card", gu: "પાન કાર્ડ" },
   voter_id: { en: "Voter ID", gu: "મતદાર ઓળખ કાર્ડ" },
   husband_aadhaar: { en: "Husband's Aadhaar", gu: "પતિનું આધાર" },
+  father_aadhaar: { en: "Father's Aadhaar", gu: "પિતાનું આધાર" },
+  mother_aadhaar: { en: "Mother's Aadhaar", gu: "માતાનું આધાર" },
+  mother_name: { en: "Mother's name", gu: "માતાનું નામ" },
   married_lady_toggle: {
     en: "Is this for a married lady?",
     gu: "શું આ પરણિત મહિલા માટે છે?",
@@ -44,6 +47,22 @@ export const STRINGS = {
   married_lady_hint: {
     en: "Base document has father's name, but Aadhaar/PAN has husband's name.",
     gu: "મુખ્ય દસ્તાવેજમાં પિતાનું નામ છે, જ્યારે આધાર/પાન માં પતિનું નામ હોય છે.",
+  },
+  minor_toggle: {
+    en: "Is this for a minor (child)?",
+    gu: "શું આ બાળક (Minor) માટે છે?",
+  },
+  minor_hint: {
+    en: "For a minor's Aadhaar correction, both parents' Aadhaar cards are mandatory.",
+    gu: "બાળકના આધાર સુધારા માટે માતા-પિતા બંનેનું આધાર ફરજિયાત છે.",
+  },
+  minor_only_birth: {
+    en: "Select Birth Certificate as the Base Document for a minor case.",
+    gu: "Minor કેસ માટે Base Document તરીકે જન્મ પ્રમાણપત્ર પસંદ કરો.",
+  },
+  parents_required: {
+    en: "Both Father's and Mother's Aadhaar must be added before booking an expert call.",
+    gu: "નિષ્ણાંત કોલ બુક કરતા પહેલા પિતા અને માતા બંનેનું આધાર ઉમેરવું ફરજિયાત છે.",
   },
   add_doc: { en: "Add", gu: "ઉમેરો" },
   edit_doc: { en: "Edit", gu: "સંપાદન" },

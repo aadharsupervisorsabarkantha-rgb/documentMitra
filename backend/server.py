@@ -59,6 +59,7 @@ class ExtractedFields(BaseModel):
     dob: Optional[str] = None
     doc_number: Optional[str] = None
     father_name: Optional[str] = None
+    mother_name: Optional[str] = None
     surname: Optional[str] = None
     first_name: Optional[str] = None
 
@@ -70,11 +71,12 @@ class OcrOut(BaseModel):
     raw: Optional[str] = None
 
 class DocumentIn(BaseModel):
-    doc_type: str  # aadhaar | pan | voter_id | passport | birth | lc | husband_aadhaar
+    doc_type: str  # aadhaar | pan | voter_id | passport | birth | lc | husband_aadhaar | father_aadhaar | mother_aadhaar
     name: Optional[str] = None
     dob: Optional[str] = None
     doc_number: Optional[str] = None
     father_name: Optional[str] = None
+    mother_name: Optional[str] = None
     surname: Optional[str] = None
     first_name: Optional[str] = None
     mode: str = "manual"  # manual | camera | gallery
@@ -87,6 +89,7 @@ class DocumentOut(DocumentIn):
 class ProfileStateIn(BaseModel):
     base_doc_type: Optional[str] = None
     is_married_lady: Optional[bool] = None
+    is_minor: Optional[bool] = None
     language: Optional[str] = None
 
 class BookingIn(BaseModel):
@@ -97,26 +100,30 @@ class BookingIn(BaseModel):
 
 # ---------- Helpers ----------
 
-ALLOWED_DOC_TYPES = {"aadhaar", "pan", "voter_id", "passport", "birth", "lc", "husband_aadhaar"}
+ALLOWED_DOC_TYPES = {"aadhaar", "pan", "voter_id", "passport", "birth", "lc", "husband_aadhaar", "father_aadhaar", "mother_aadhaar"}
 
 DOC_TYPE_LABELS = {
     "aadhaar": "Aadhaar Card",
     "pan": "PAN Card",
-    "voter_id": "Voter ID",
+    "voter_id": "Voter ID / Election Card",
     "passport": "Passport",
     "birth": "Birth Certificate",
     "lc": "School Leaving Certificate",
     "husband_aadhaar": "Husband's Aadhaar Card",
+    "father_aadhaar": "Father's Aadhaar Card",
+    "mother_aadhaar": "Mother's Aadhaar Card",
 }
 
 DOC_TYPE_GU = {
     "aadhaar": "આધાર કાર્ડ",
     "pan": "પાન કાર્ડ",
-    "voter_id": "મતદાર ઓળખ કાર્ડ",
+    "voter_id": "ચૂંટણી કાર્ડ",
     "passport": "પાસપોર્ટ",
     "birth": "જન્મ પ્રમાણપત્ર",
     "lc": "શાળા છોડ્યાનું પ્રમાણપત્ર",
     "husband_aadhaar": "પતિનું આધાર કાર્ડ",
+    "father_aadhaar": "પિતાનું આધાર કાર્ડ",
+    "mother_aadhaar": "માતાનું આધાર કાર્ડ",
 }
 
 def make_jwt(user_id: str, phone: str) -> str:
@@ -184,6 +191,7 @@ Return ONLY a valid JSON object (no markdown fences) with these keys:
   "dob": "Date of birth in DD/MM/YYYY if present, else null",
   "doc_number": "The document number (Aadhaar 12-digit, PAN 10-char, EPIC, Passport, etc.) or null",
   "father_name": "Father/guardian name if printed, else null",
+  "mother_name": "Mother's name if printed (especially on Birth Certificates), else null",
   "headers_found": ["list of distinctive headers/issuer text you actually read, e.g. 'Government of India', 'Income Tax Department', 'Election Commission of India', 'Unique Identification Authority of India', 'Republic of India', 'School Leaving Certificate', 'Birth Certificate'"]
 }
 
@@ -272,6 +280,7 @@ async def verify_otp(payload: VerifyOtpIn):
             "user_id": user["id"],
             "base_doc_type": None,
             "is_married_lady": False,
+            "is_minor": False,
             "language": payload.language or "en",
         })
     else:
@@ -292,6 +301,7 @@ async def get_profile_state(user=Depends(current_user)):
             "user_id": user["id"],
             "base_doc_type": None,
             "is_married_lady": False,
+            "is_minor": False,
             "language": user.get("language", "en"),
         }
         await db.profiles.insert_one(profile.copy())
@@ -304,6 +314,11 @@ async def update_profile_state(payload: ProfileStateIn, user=Depends(current_use
     update = {k: v for k, v in payload.dict().items() if v is not None}
     if "base_doc_type" in update and update["base_doc_type"] not in {"birth", "lc", "passport", "aadhaar"}:
         raise HTTPException(status_code=400, detail="Base doc must be birth | lc | passport | aadhaar")
+    # married_lady and minor are mutually exclusive in the workflow
+    if update.get("is_minor") is True:
+        update["is_married_lady"] = False
+    if update.get("is_married_lady") is True:
+        update["is_minor"] = False
     if update:
         await db.profiles.update_one({"user_id": user["id"]}, {"$set": update}, upsert=True)
         if "language" in update:
@@ -342,8 +357,10 @@ async def ocr_extract(payload: OcrIn, user=Depends(current_user)):
         raise HTTPException(status_code=400, detail="Unknown expected_doc_type")
     data = await gpt_ocr(payload.image_base64)
     detected = (data.get("detected_type") or "unknown").lower()
-    # 'husband_aadhaar' is structurally aadhaar
-    expected = "aadhaar" if payload.expected_doc_type == "husband_aadhaar" else payload.expected_doc_type
+    # ocr/extract handler — also adjust 'husband_aadhaar' etc structurally to aadhaar
+    expected = payload.expected_doc_type
+    if expected in {"husband_aadhaar", "father_aadhaar", "mother_aadhaar"}:
+        expected = "aadhaar"
     type_match = (detected == expected)
     error_message = None
     if not type_match:
@@ -355,6 +372,7 @@ async def ocr_extract(payload: OcrIn, user=Depends(current_user)):
         dob=data.get("dob"),
         doc_number=data.get("doc_number"),
         father_name=data.get("father_name"),
+        mother_name=data.get("mother_name"),
         surname=data.get("surname"),
         first_name=data.get("first_name"),
     )
@@ -384,153 +402,293 @@ async def verify_roadmap(user=Depends(current_user)):
     docs = await db.documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(50)
     base_type = profile.get("base_doc_type")
     is_ml = bool(profile.get("is_married_lady"))
+    is_minor = bool(profile.get("is_minor"))
     issues: List[Dict[str, Any]] = []
-    statuses: Dict[str, str] = {}  # doc_type -> match | mismatch | pending
+    statuses: Dict[str, str] = {}
+    roadmap: List[Dict[str, Any]] = []
+
+    def step(title_en, title_gu, detail_en, detail_gu, doc_type=None):
+        roadmap.append({
+            "step": len(roadmap) + 1,
+            "title_en": title_en,
+            "title_gu": title_gu,
+            "detail_en": detail_en,
+            "detail_gu": detail_gu,
+            "doc_type": doc_type,
+        })
+
     if not base_type:
         return {
-            "ready": False,
-            "base_doc_type": None,
-            "is_married_lady": is_ml,
-            "issues": [],
-            "statuses": {},
-            "roadmap": [],
-            "needs_husband_aadhaar": is_ml,
+            "ready": False, "base_doc_type": None,
+            "is_married_lady": is_ml, "is_minor": is_minor,
+            "needs_husband_aadhaar": is_ml, "needs_father_aadhaar": is_minor, "needs_mother_aadhaar": is_minor,
+            "issues": [], "statuses": {}, "roadmap": [],
         }
     base_doc = _doc_by_type(docs, base_type)
-    if not base_doc:
+
+    # ---------- MINOR FLOW (must be base=birth) ----------
+    if is_minor:
+        father = _doc_by_type(docs, "father_aadhaar")
+        mother = _doc_by_type(docs, "mother_aadhaar")
+        needs_father = not father
+        needs_mother = not mother
+        if base_type != "birth":
+            step("Use Birth Certificate as Base",
+                 "Minor માટે જન્મ પ્રમાણપત્ર base તરીકે પસંદ કરો",
+                 "For minor applicants, the Base Document must be the child's Birth Certificate.",
+                 "Minor (બાળક) માટે Base Document તરીકે જન્મ પ્રમાણપત્ર પસંદ કરવું ફરજિયાત છે.",
+                 doc_type="birth")
+            return {
+                "ready": False, "base_doc_type": base_type,
+                "is_married_lady": False, "is_minor": True,
+                "needs_father_aadhaar": needs_father, "needs_mother_aadhaar": needs_mother,
+                "issues": [], "statuses": {}, "roadmap": roadmap,
+            }
+        if not base_doc:
+            step("Add Birth Certificate data", "જન્મ પ્રમાણપત્ર ઉમેરો",
+                 "Please add child's Birth Certificate (name, DOB, father, mother).",
+                 "બાળકના જન્મ પ્રમાણપત્રની વિગતો ઉમેરો (નામ, જન્મતારીખ, પિતાનું નામ, માતાનું નામ).",
+                 doc_type="birth")
+        birth_father = (base_doc or {}).get("father_name") or ""
+        birth_mother = (base_doc or {}).get("mother_name") or ""
+
+        # Status for parent aadhaars
+        if not father:
+            statuses["father_aadhaar"] = "pending"
+        else:
+            father_ok = names_match(birth_father, father.get("name"))
+            statuses["father_aadhaar"] = "match" if father_ok else "mismatch"
+        if not mother:
+            statuses["mother_aadhaar"] = "pending"
+        else:
+            mother_ok = names_match(birth_mother, mother.get("name"))
+            statuses["mother_aadhaar"] = "match" if mother_ok else "mismatch"
+
+        if needs_father:
+            step("Upload Father's Aadhaar (mandatory)",
+                 "પિતાનું આધાર ઉમેરો (ફરજિયાત)",
+                 "Minor's Aadhaar correction requires the Father's Aadhaar Card. Please scan or enter it.",
+                 "બાળકના આધાર સુધારા માટે પિતાનું આધાર કાર્ડ ફરજિયાત છે. મહેરબાની કરીને સ્કેન કરો અથવા દાખલ કરો.",
+                 doc_type="father_aadhaar")
+        if needs_mother:
+            step("Upload Mother's Aadhaar (mandatory)",
+                 "માતાનું આધાર ઉમેરો (ફરજિયાત)",
+                 "Minor's Aadhaar correction requires the Mother's Aadhaar Card. Please scan or enter it.",
+                 "બાળકના આધાર સુધારા માટે માતાનું આધાર કાર્ડ ફરજિયાત છે. મહેરબાની કરીને સ્કેન કરો અથવા દાખલ કરો.",
+                 doc_type="mother_aadhaar")
+        if father and birth_father and statuses["father_aadhaar"] == "mismatch":
+            issues.append({
+                "code": "minor_father_name_mismatch",
+                "message_en": "Father's name on Birth Certificate does not match Father's Aadhaar Card.",
+                "message_gu": "જન્મ પ્રમાણપત્ર પર પિતાનું નામ પિતાના આધાર સાથે મેળ ખાતું નથી.",
+            })
+            step("Fix Father's name mismatch",
+                 "પિતાનું નામ સુધારો",
+                 "Father's name on Birth Certificate and Father's Aadhaar must match exactly. Get the mismatch corrected at the nearest CSC.",
+                 "જન્મ પ્રમાણપત્ર અને પિતાના આધારમાં પિતાનું નામ 100% સરખું હોવું જરૂરી છે. નજીકના CSC પર સુધારો કરાવો.",
+                 doc_type="father_aadhaar")
+        if mother and birth_mother and statuses["mother_aadhaar"] == "mismatch":
+            issues.append({
+                "code": "minor_mother_name_mismatch",
+                "message_en": "Mother's name on Birth Certificate does not match Mother's Aadhaar Card.",
+                "message_gu": "જન્મ પ્રમાણપત્ર પર માતાનું નામ માતાના આધાર સાથે મેળ ખાતું નથી.",
+            })
+            step("Fix Mother's name mismatch",
+                 "માતાનું નામ સુધારો",
+                 "Mother's name on Birth Certificate and Mother's Aadhaar must match exactly. Get the mismatch corrected at the nearest CSC.",
+                 "જન્મ પ્રમાણપત્ર અને માતાના આધારમાં માતાનું નામ 100% સરખું હોવું જરૂરી છે. નજીકના CSC પર સુધારો કરાવો.",
+                 doc_type="mother_aadhaar")
+
+        ready_to_correct_minor = (
+            base_doc is not None and not needs_father and not needs_mother and
+            statuses.get("father_aadhaar") == "match" and statuses.get("mother_aadhaar") == "match"
+        )
+        if ready_to_correct_minor:
+            step("Correct Minor's Aadhaar Card",
+                 "બાળકના આધાર કાર્ડમાં સુધારો કરાવો",
+                 "Visit the nearest CSC with the child's Birth Certificate and both parents' Aadhaar Cards to apply the Aadhaar correction for the minor.",
+                 "નજીકના CSC પર જઈ બાળકના જન્મ પ્રમાણપત્ર અને માતા-પિતા બંનેના આધાર સાથે Minor ના આધાર કાર્ડમાં સુધારો કરાવો.",
+                 doc_type="aadhaar")
         return {
-            "ready": False,
-            "base_doc_type": base_type,
-            "is_married_lady": is_ml,
-            "issues": [{"code": "base_missing", "message_en": "Please add your Base Document data first.",
-                        "message_gu": "પહેલા તમારો મુખ્ય દસ્તાવેજ ઉમેરો."}],
-            "statuses": {},
-            "roadmap": [],
-            "needs_husband_aadhaar": is_ml,
+            "ready": ready_to_correct_minor,
+            "base_doc_type": base_type, "is_married_lady": False, "is_minor": True,
+            "needs_father_aadhaar": needs_father, "needs_mother_aadhaar": needs_mother,
+            "needs_husband_aadhaar": False,
+            "issues": issues, "statuses": statuses, "roadmap": roadmap,
         }
+
+    if not base_doc:
+        step("Add your Base Document data", "મુખ્ય દસ્તાવેજનો ડેટા ઉમેરો",
+             "Please add your Base Document details first.",
+             "પહેલા તમારો મુખ્ય દસ્તાવેજ ઉમેરો.",
+             doc_type=base_type)
+        return {
+            "ready": False, "base_doc_type": base_type,
+            "is_married_lady": is_ml, "is_minor": False,
+            "needs_husband_aadhaar": is_ml,
+            "needs_father_aadhaar": False, "needs_mother_aadhaar": False,
+            "issues": [], "statuses": {}, "roadmap": roadmap,
+        }
+
     base_name = base_doc.get("name") or ""
     base_dob = base_doc.get("dob") or ""
 
-    # Iterate verifiable docs (exclude whichever is currently the base)
+    # ---------- compute statuses on identity docs ----------
     all_targets = ["aadhaar", "pan", "voter_id", "passport"]
     check_targets = [t for t in all_targets if t != base_type]
     husband_doc = _doc_by_type(docs, "husband_aadhaar") if is_ml else None
     needs_husband = is_ml and not husband_doc
+
+    husband_name = ""
+    if husband_doc:
+        husband_name = ((husband_doc.get("first_name") or "") + " " +
+                        (husband_doc.get("surname") or husband_doc.get("name") or "")).strip() or (husband_doc.get("name") or "")
 
     for t in check_targets:
         d = _doc_by_type(docs, t)
         if not d:
             statuses[t] = "pending"
             continue
-        problems = []
         if is_ml:
-            # Name in current doc should match HUSBAND's first+surname, not base father name
-            if husband_doc:
-                husband_name = (husband_doc.get("first_name") or "") + " " + (husband_doc.get("surname") or husband_doc.get("name") or "")
-                husband_name = husband_name.strip() or (husband_doc.get("name") or "")
-                if not names_match(husband_name, d.get("name")):
-                    problems.append({
-                        "code": "ml_name_mismatch",
-                        "doc_type": t,
-                        "message_en": f"Name on {DOC_TYPE_LABELS[t]} does not match husband's name from Husband Aadhaar.",
-                        "message_gu": f"{DOC_TYPE_GU[t]} પર નામ પતિના આધાર સાથે મેળ ખાતું નથી.",
-                    })
-            else:
-                problems.append({
-                    "code": "ml_husband_required",
-                    "doc_type": t,
-                    "message_en": "Please add Husband's Aadhaar to verify the lady's name change.",
-                    "message_gu": "મહેરબાની કરીને પતિનું આધાર ઉમેરો.",
-                })
-            # DOB must still match base
-            if not dob_match(base_dob, d.get("dob")):
-                problems.append({
-                    "code": "dob_mismatch",
-                    "doc_type": t,
-                    "message_en": f"Date of birth on {DOC_TYPE_LABELS[t]} does not match {DOC_TYPE_LABELS[base_type]}.",
-                    "message_gu": f"{DOC_TYPE_GU[t]} પર જન્મ તારીખ {DOC_TYPE_GU[base_type]} સાથે મેળ ખાતી નથી.",
-                })
+            name_ok = bool(husband_doc) and names_match(husband_name, d.get("name"))
         else:
-            # Normal: name & dob must match base
-            if not names_match(base_name, d.get("name")):
-                problems.append({
-                    "code": "name_mismatch",
-                    "doc_type": t,
-                    "message_en": f"Name on {DOC_TYPE_LABELS[t]} does not match {DOC_TYPE_LABELS[base_type]}.",
-                    "message_gu": f"{DOC_TYPE_GU[t]} પર નામ {DOC_TYPE_GU[base_type]} સાથે મેળ ખાતું નથી.",
-                })
-            if not dob_match(base_dob, d.get("dob")):
-                problems.append({
-                    "code": "dob_mismatch",
-                    "doc_type": t,
-                    "message_en": f"Date of birth on {DOC_TYPE_LABELS[t]} does not match {DOC_TYPE_LABELS[base_type]}.",
-                    "message_gu": f"{DOC_TYPE_GU[t]} પર જન્મ તારીખ {DOC_TYPE_GU[base_type]} સાથે મેળ ખાતી નથી.",
-                })
-        if problems:
-            statuses[t] = "mismatch"
-            issues.extend(problems)
-        else:
-            statuses[t] = "match"
+            name_ok = names_match(base_name, d.get("name"))
+        dob_ok = dob_match(base_dob, d.get("dob"))
+        statuses[t] = "match" if (name_ok and dob_ok) else "mismatch"
+        if not name_ok:
+            issues.append({
+                "code": "name_mismatch", "doc_type": t,
+                "message_en": f"Name on {DOC_TYPE_LABELS[t]} does not match the source of truth.",
+                "message_gu": f"{DOC_TYPE_GU[t]} પર નામ મેળ ખાતું નથી.",
+            })
+        if not dob_ok:
+            issues.append({
+                "code": "dob_mismatch", "doc_type": t,
+                "message_en": f"Date of birth on {DOC_TYPE_LABELS[t]} does not match {DOC_TYPE_LABELS[base_type]}.",
+                "message_gu": f"{DOC_TYPE_GU[t]} પર જન્મ તારીખ {DOC_TYPE_GU[base_type]} સાથે મેળ ખાતી નથી.",
+            })
 
-    # Build sequential roadmap. Aadhaar first if it's not the base, then PAN, then Voter ID, then Passport.
+    # ---------- MARRIED LADY hierarchy ----------
+    if is_ml:
+        if needs_husband:
+            step("Add Husband's Aadhaar",
+                 "પતિનું આધાર ઉમેરો",
+                 "Please scan or enter Husband's Aadhaar so we can verify your name change.",
+                 "મહેરબાની કરીને પતિનું આધાર સ્કેન અથવા દાખલ કરો.",
+                 doc_type="husband_aadhaar")
+        if statuses.get("aadhaar") == "mismatch":
+            step("Step 1 — Correct Election Card first",
+                 "પગલું 1 — સૌપ્રથમ ચૂંટણી કાર્ડ સુધારો",
+                 "Using your Marriage Certificate, first correct your Election Card (Voter ID) at the BLO / Mamlatdar office.",
+                 "Marriage Certificate ના આધારે સૌથી પહેલા ચૂંટણી કાર્ડ (Election Card) માં સુધારો કરવો પડશે.",
+                 doc_type="voter_id")
+            step("Step 2 — Correct Aadhaar Card",
+                 "પગલું 2 — આધાર કાર્ડ સુધારો",
+                 "Only after the Election Card is corrected, update your Aadhaar Card with the husband's surname.",
+                 "ચૂંટણી કાર્ડ સુધર્યા પછી જ આધાર કાર્ડ (Aadhaar Card) માં સુધારો થશે.",
+                 doc_type="aadhaar")
+            step("Step 3 — Correct PAN Card",
+                 "પગલું 3 — પાન કાર્ડ સુધારો",
+                 "Finally, update the PAN Card using the corrected Aadhaar.",
+                 "છેલ્લે, પાન કાર્ડ (PAN Card) માં સુધારો થશે.",
+                 doc_type="pan")
+        elif statuses.get("pan") == "mismatch":
+            step("Correct PAN Card",
+                 "પાન કાર્ડ સુધારો",
+                 "Update PAN using the corrected Aadhaar/Election Card.",
+                 "સુધારેલા આધાર/ચૂંટણી કાર્ડના આધારે PAN સુધારો.",
+                 doc_type="pan")
+        elif statuses.get("voter_id") == "mismatch":
+            step("Correct Election Card",
+                 "ચૂંટણી કાર્ડ સુધારો",
+                 "Update your Election Card with husband's surname using Marriage Certificate.",
+                 "Marriage Certificate ના આધારે ચૂંટણી કાર્ડમાં સુધારો કરાવો.",
+                 doc_type="voter_id")
+        if not roadmap:
+            step("All documents match!", "બધાં દસ્તાવેજો મેળ ખાય છે!",
+                 "Great — your documents are consistent with your husband's Aadhaar.",
+                 "ખુશીની વાત — તમારા તમામ દસ્તાવેજો સુસંગત છે.")
+        return {
+            "ready": not needs_husband,
+            "base_doc_type": base_type, "is_married_lady": True, "is_minor": False,
+            "needs_husband_aadhaar": needs_husband,
+            "needs_father_aadhaar": False, "needs_mother_aadhaar": False,
+            "issues": issues, "statuses": statuses, "roadmap": roadmap,
+        }
+
+    # ---------- NORMAL FLOW (specific Gujarati guidance) ----------
+    # Case A: base = Birth Certificate and Aadhaar mismatch
+    if base_type == "birth" and statuses.get("aadhaar") == "mismatch":
+        step("Step 1 — Correct Election Card first",
+             "પગલું 1 — સૌપ્રથમ ચૂંટણી કાર્ડ સુધારો",
+             "First correct your Election Card via the local BLO (Booth Level Officer) or Mamlatdar office using your Birth Certificate.",
+             "સૌથી પહેલા ચૂંટણી કાર્ડ (Election Card) માં સુધારો કરવો પડશે. આ સુધારો તમારા વિસ્તારના BLO (Booth Level Officer) પાસે અથવા મામલતદાર ઓફિસમાં જન્મ પ્રમાણપત્રના આધારે ઇલેક્શન ડિપાર્ટમેન્ટમાં થશે.",
+             doc_type="voter_id")
+        step("Step 2 — Correct Aadhaar Card",
+             "પગલું 2 — આધાર કાર્ડ સુધારો",
+             "Only after the Election Card is corrected, proceed with the Aadhaar Card update.",
+             "ચૂંટણી કાર્ડ સુધરી ગયા પછી જ આધાર કાર્ડ (Aadhaar Card) નું કામ આગળ થશે.",
+             doc_type="aadhaar")
+        if statuses.get("pan") == "mismatch":
+            step("Step 3 — Correct PAN Card",
+                 "પગલું 3 — પાન કાર્ડ સુધારો",
+                 "After Aadhaar is corrected, apply the PAN correction using the updated Aadhaar.",
+                 "આધાર સુધર્યા પછી, સુધારેલા આધારના આધારે PAN કાર્ડમાં સુધારો કરાવો.",
+                 doc_type="pan")
+        return {
+            "ready": True,
+            "base_doc_type": base_type, "is_married_lady": False, "is_minor": False,
+            "needs_husband_aadhaar": False,
+            "needs_father_aadhaar": False, "needs_mother_aadhaar": False,
+            "issues": issues, "statuses": statuses, "roadmap": roadmap,
+        }
+
+    # Case B: Aadhaar is correct, Election Card is wrong
+    if statuses.get("aadhaar") == "match" and statuses.get("voter_id") == "mismatch":
+        step("Visit nearest CSC for Election Card correction",
+             "નજીકના CSC પર જઈ ચૂંટણી કાર્ડ સુધારો",
+             "Visit the nearest CSC (Common Service Centre) and correct your Election Card using your Aadhaar Card.",
+             "નજીકના CSC (કોમન સર્વિસ સેન્ટર) પર જાઓ અને આધાર કાર્ડના આધારે ચૂંટણી કાર્ડમાં સુધારો કરાવો.",
+             doc_type="voter_id")
+        if statuses.get("pan") == "mismatch":
+            step("Then correct PAN Card",
+                 "ત્યારબાદ પાન કાર્ડ સુધારો",
+                 "After that, use the corrected Election Card and Aadhaar to update the PAN Card.",
+                 "ત્યારબાદ, સુધારેલા ચૂંટણી કાર્ડ અને આધાર કાર્ડનો ઉપયોગ કરીને પાન કાર્ડ (PAN Card) માં સુધારો થશે.",
+                 doc_type="pan")
+        return {
+            "ready": True,
+            "base_doc_type": base_type, "is_married_lady": False, "is_minor": False,
+            "needs_husband_aadhaar": False,
+            "needs_father_aadhaar": False, "needs_mother_aadhaar": False,
+            "issues": issues, "statuses": statuses, "roadmap": roadmap,
+        }
+
+    # ---------- Generic fallback ----------
     order = [t for t in ["aadhaar", "pan", "voter_id", "passport"] if t != base_type]
-    roadmap = []
-    step = 1
-    if needs_husband:
-        roadmap.append({
-            "step": step,
-            "title_en": "Add Husband's Aadhaar",
-            "title_gu": "પતિનું આધાર ઉમેરો",
-            "detail_en": "Scan or enter your husband's Aadhaar Card so we can verify your name change.",
-            "detail_gu": "મહેરબાની કરીને પતિનું આધાર સ્કેન અથવા દાખલ કરો.",
-            "doc_type": "husband_aadhaar",
-        })
-        step += 1
     for t in order:
         if statuses.get(t) == "mismatch":
-            prev_order = {"aadhaar": [], "pan": ["Aadhaar"], "voter_id": ["Aadhaar", "PAN"], "passport": ["Aadhaar", "PAN"]}
-            prev = [p for p in prev_order.get(t, []) if p.lower().replace(" ", "_") != base_type]
-            detail_en = f"Apply correction in {DOC_TYPE_LABELS[t]} to match {DOC_TYPE_LABELS[base_type]}."
-            detail_gu = f"{DOC_TYPE_GU[t]} માં {DOC_TYPE_GU[base_type]} મુજબ સુધારો કરાવો."
-            if prev:
-                detail_en += f" Do this after fixing {', '.join(prev)}."
-                detail_gu += f" પહેલા {', '.join(prev)} સુધારો."
-            roadmap.append({
-                "step": step,
-                "title_en": f"Correct {DOC_TYPE_LABELS[t]}",
-                "title_gu": f"{DOC_TYPE_GU[t]} માં સુધારો કરાવો",
-                "detail_en": detail_en,
-                "detail_gu": detail_gu,
-                "doc_type": t,
-            })
-            step += 1
+            step(f"Correct {DOC_TYPE_LABELS[t]}",
+                 f"{DOC_TYPE_GU[t]} માં સુધારો કરાવો",
+                 f"Apply correction in {DOC_TYPE_LABELS[t]} to match {DOC_TYPE_LABELS[base_type]}.",
+                 f"{DOC_TYPE_GU[t]} માં {DOC_TYPE_GU[base_type]} મુજબ સુધારો કરાવો.",
+                 doc_type=t)
         elif statuses.get(t) == "pending":
-            roadmap.append({
-                "step": step,
-                "title_en": f"Add {DOC_TYPE_LABELS[t]} data",
-                "title_gu": f"{DOC_TYPE_GU[t]} નો ડેટા ઉમેરો",
-                "detail_en": f"Please scan or enter your {DOC_TYPE_LABELS[t]}.",
-                "detail_gu": f"મહેરબાની કરીને {DOC_TYPE_GU[t]} સ્કેન અથવા દાખલ કરો.",
-                "doc_type": t,
-            })
-            step += 1
+            step(f"Add {DOC_TYPE_LABELS[t]} data",
+                 f"{DOC_TYPE_GU[t]} નો ડેટા ઉમેરો",
+                 f"Please scan or enter your {DOC_TYPE_LABELS[t]}.",
+                 f"મહેરબાની કરીને {DOC_TYPE_GU[t]} સ્કેન અથવા દાખલ કરો.",
+                 doc_type=t)
     if not roadmap:
-        roadmap.append({
-            "step": 1,
-            "title_en": "All documents match!",
-            "title_gu": "બધાં દસ્તાવેજો મેળ ખાય છે!",
-            "detail_en": "Great — your documents are consistent with your base document.",
-            "detail_gu": "ખુશીની વાત — તમારા તમામ દસ્તાવેજો સુસંગત છે.",
-            "doc_type": None,
-        })
+        step("All documents match!", "બધાં દસ્તાવેજો મેળ ખાય છે!",
+             "Great — your documents are consistent with your base document.",
+             "ખુશીની વાત — તમારા તમામ દસ્તાવેજો સુસંગત છે.")
     return {
         "ready": True,
-        "base_doc_type": base_type,
-        "is_married_lady": is_ml,
-        "needs_husband_aadhaar": needs_husband,
-        "issues": issues,
-        "statuses": statuses,
-        "roadmap": roadmap,
+        "base_doc_type": base_type, "is_married_lady": False, "is_minor": False,
+        "needs_husband_aadhaar": False,
+        "needs_father_aadhaar": False, "needs_mother_aadhaar": False,
+        "issues": issues, "statuses": statuses, "roadmap": roadmap,
     }
 
 # ---------- Expert booking (mock) ----------
@@ -560,6 +718,17 @@ async def expert_slots(user=Depends(current_user)):
 async def expert_book(payload: BookingIn, user=Depends(current_user)):
     if payload.mode not in {"audio", "video"}:
         raise HTTPException(status_code=400, detail="mode must be audio or video")
+    profile = await db.profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
+    if profile.get("is_minor"):
+        # Both parent aadhaars are mandatory for minor case
+        father = await db.documents.find_one({"user_id": user["id"], "doc_type": "father_aadhaar"}, {"_id": 0})
+        mother = await db.documents.find_one({"user_id": user["id"], "doc_type": "mother_aadhaar"}, {"_id": 0})
+        if not father or not mother:
+            raise HTTPException(
+                status_code=400,
+                detail="Minor case requires both Father's Aadhaar and Mother's Aadhaar before booking. "
+                       "Minor (બાળક) કેસ માટે પિતા અને માતા બંનેનું આધાર ઉમેરવું ફરજિયાત છે.",
+            )
     booking = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],

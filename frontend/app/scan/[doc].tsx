@@ -21,7 +21,7 @@ import { useApp } from "@/src/store";
 import { t, Lang, StringKey } from "@/src/i18n";
 import { colors, radius, spacing, typeScale } from "@/src/theme";
 
-const VALID = new Set(["aadhaar", "pan", "voter_id", "passport", "birth", "lc", "husband_aadhaar"]);
+const VALID = new Set(["aadhaar", "pan", "voter_id", "passport", "birth", "lc", "husband_aadhaar", "father_aadhaar", "mother_aadhaar"]);
 
 type OcrOut = {
   detected_type: string;
@@ -32,6 +32,7 @@ type OcrOut = {
     dob?: string | null;
     doc_number?: string | null;
     father_name?: string | null;
+    mother_name?: string | null;
     surname?: string | null;
     first_name?: string | null;
   };
@@ -57,6 +58,7 @@ export default function ScanScreen() {
   const [dob, setDob] = useState(existing?.dob || "");
   const [docNumber, setDocNumber] = useState(existing?.doc_number || "");
   const [fatherName, setFatherName] = useState(existing?.father_name || "");
+  const [motherName, setMotherName] = useState(existing?.mother_name || "");
   const [saving, setSaving] = useState(false);
   const [inputMode, setInputMode] = useState<"manual" | "camera" | "gallery">(
     (existing?.mode as any) || "manual",
@@ -80,6 +82,7 @@ export default function ScanScreen() {
     if (f.dob) setDob(f.dob);
     if (f.doc_number) setDocNumber(f.doc_number);
     if (f.father_name) setFatherName(f.father_name);
+    if (f.mother_name) setMotherName(f.mother_name);
     setMode("form");
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   };
@@ -157,6 +160,7 @@ export default function ScanScreen() {
           dob: dob || null,
           doc_number: docNumber || null,
           father_name: fatherName || null,
+          mother_name: motherName || null,
           mode: inputMode,
         }),
       });
@@ -271,7 +275,10 @@ export default function ScanScreen() {
             <Field label={t(lang, "dob")} value={dob} onChangeText={setDob} placeholder="DD/MM/YYYY" testID="field-dob" />
             <Field label={t(lang, "doc_number")} value={docNumber} onChangeText={setDocNumber} testID="field-doc-number" />
             {(docType === "birth" || docType === "lc") ? (
-              <Field label={t(lang, "father_name")} value={fatherName} onChangeText={setFatherName} testID="field-father-name" />
+              <>
+                <Field label={t(lang, "father_name")} value={fatherName} onChangeText={setFatherName} testID="field-father-name" />
+                <Field label={t(lang, "mother_name")} value={motherName} onChangeText={setMotherName} testID="field-mother-name" />
+              </>
             ) : null}
             <Pressable
               testID="rescan-btn"

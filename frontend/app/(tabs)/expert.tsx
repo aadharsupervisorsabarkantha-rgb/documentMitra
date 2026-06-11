@@ -29,6 +29,7 @@ export default function ExpertTab() {
   const [loading, setLoading] = useState(false);
   const [booking, setBooking] = useState(false);
   const [success, setSuccess] = useState<{ whatsapp: string } | null>(null);
+  const [bookingErr, setBookingErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +57,7 @@ export default function ExpertTab() {
   const book = async () => {
     if (!picked) return;
     setBooking(true);
+    setBookingErr(null);
     try {
       const res = await api<{ whatsapp_link: string }>("/api/expert/book", {
         method: "POST",
@@ -67,6 +69,7 @@ export default function ExpertTab() {
       load();
     } catch (e: any) {
       console.warn(e);
+      setBookingErr(e.message || "Booking failed");
     } finally {
       setBooking(false);
     }
@@ -124,6 +127,13 @@ export default function ExpertTab() {
             </View>
           ))
         )}
+
+        {bookingErr ? (
+          <View style={styles.errorCard} testID="booking-error">
+            <Ionicons name="alert-circle" size={22} color={colors.error} />
+            <Text style={styles.errorText}>{bookingErr}</Text>
+          </View>
+        ) : null}
 
         {success ? (
           <View style={styles.successCard} testID="booking-success">
@@ -203,6 +213,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#E6F4EA", borderRadius: radius.md, marginTop: spacing.md,
   },
   successText: { flex: 1, color: colors.onSurface, fontSize: typeScale.base, fontWeight: "600" },
+  errorCard: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md,
+    backgroundColor: "#FDECEA", borderRadius: radius.md, marginTop: spacing.md,
+    borderWidth: 1, borderColor: colors.error,
+  },
+  errorText: { flex: 1, color: colors.error, fontSize: typeScale.base, fontWeight: "600" },
   whatsBtn: {
     flexDirection: "row", gap: 6, alignItems: "center",
     backgroundColor: "#25D366", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill,

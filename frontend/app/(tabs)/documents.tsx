@@ -8,12 +8,12 @@ import { useApp } from "@/src/store";
 import { t } from "@/src/i18n";
 import { colors, radius, spacing, typeScale } from "@/src/theme";
 
-const ALL_DOCS = ["aadhaar", "pan", "voter_id", "birth", "lc", "passport", "husband_aadhaar"] as const;
+const ALL_DOCS = ["aadhaar", "pan", "voter_id", "birth", "lc", "passport", "husband_aadhaar", "father_aadhaar", "mother_aadhaar"] as const;
 
 export default function DocumentsTab() {
   const { lang, documents, refresh, profile } = useApp();
   const router = useRouter();
-  const [refreshing, setRefreshing] = useState(false);
+  const [_refreshing, _setRefreshing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -23,6 +23,7 @@ export default function DocumentsTab() {
 
   const visible = ALL_DOCS.filter((d) => {
     if (d === "husband_aadhaar") return !!profile?.is_married_lady;
+    if (d === "father_aadhaar" || d === "mother_aadhaar") return !!profile?.is_minor;
     return true;
   });
 
