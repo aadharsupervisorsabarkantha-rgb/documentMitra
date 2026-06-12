@@ -127,6 +127,33 @@ export const STRINGS = {
     en: "LC is not an online digital document, so you must fill in your details manually by looking at your LC.",
     gu: "LC ઓનલાઈન ડિજિટલ ડોક્યુમેન્ટ નથી, તેથી તમારે LC માં જોઈને તમારી વિગતો જાતે જ ભરવી પડશે.",
   },
+  base_locked_title: {
+    en: "Base Document is required",
+    gu: "મુખ્ય દસ્તાવેજ જરૂરી છે",
+  },
+  base_locked_body: {
+    en: "Please add your Base Document data first. Other documents are locked until then.",
+    gu: "પહેલા તમારો મુખ્ય દસ્તાવેજ ઉમેરો. ત્યાં સુધી અન્ય દસ્તાવેજો બંધ રહેશે.",
+  },
+  add_base_doc_now: { en: "Add Base Document now", gu: "મુખ્ય દસ્તાવેજ ઉમેરો" },
+  change_base_title: {
+    en: "Change Base Document?",
+    gu: "મુખ્ય દસ્તાવેજ બદલવો છે?",
+  },
+  change_base_body: {
+    en: "Do you really want to change the Base Document? This will reset all your current data.",
+    gu: "શું તમે સાચે જ મુખ્ય દસ્તાવેજ બદલવા માંગો છો? આનાથી તમારો અત્યાર સુધીનો ડેટા રીસેટ થઈ જશે.",
+  },
+  yes: { en: "Yes", gu: "હા" },
+  no: { en: "No", gu: "ના" },
+  auto_minor_banner: {
+    en: "Detected age is under 18. Minor workflow activated — please add at least one parent's Aadhaar.",
+    gu: "જન્મ તારીખ મુજબ ઉંમર 18 થી ઓછી છે. Minor વર્કફ્લો ચાલુ — ઓછામાં ઓછું એક માતા-પિતાનું આધાર ઉમેરો.",
+  },
+  gender_label: { en: "Gender", gu: "જાતિ" },
+  gender_male: { en: "Male", gu: "પુરુષ" },
+  gender_female: { en: "Female", gu: "મહિલા" },
+  gender_other: { en: "Other", gu: "અન્ય" },
 };
 
 export type StringKey = keyof typeof STRINGS;

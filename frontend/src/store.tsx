@@ -10,6 +10,8 @@ type Profile = {
   base_doc_type: string | null;
   is_married_lady: boolean;
   is_minor?: boolean;
+  detected_age?: number | null;
+  detected_gender?: string | null;
   language?: string;
 };
 

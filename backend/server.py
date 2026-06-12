@@ -62,6 +62,7 @@ class ExtractedFields(BaseModel):
     mother_name: Optional[str] = None
     surname: Optional[str] = None
     first_name: Optional[str] = None
+    gender: Optional[str] = None  # "male" | "female" | "other"
 
 class OcrOut(BaseModel):
     detected_type: str
@@ -79,6 +80,7 @@ class DocumentIn(BaseModel):
     mother_name: Optional[str] = None
     surname: Optional[str] = None
     first_name: Optional[str] = None
+    gender: Optional[str] = None
     mode: str = "manual"  # manual | camera | gallery
 
 class DocumentOut(DocumentIn):
@@ -178,6 +180,42 @@ def dob_match(a: Optional[str], b: Optional[str]) -> bool:
     dbb = re.sub(r"[^0-9]", "", b)
     return da == dbb and len(da) >= 6
 
+def calc_age(dob_str: Optional[str]) -> Optional[int]:
+    """Parse DD/MM/YYYY (or with -, .) and return integer age."""
+    if not dob_str:
+        return None
+    digits = re.sub(r"[^0-9]", "/", dob_str.strip())
+    parts = [p for p in digits.split("/") if p]
+    if len(parts) < 3:
+        return None
+    try:
+        d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+        if y < 100:
+            y += 2000 if y < 30 else 1900
+        if not (1 <= d <= 31 and 1 <= m <= 12 and 1900 <= y <= 2099):
+            return None
+        today = datetime.now(timezone.utc).date()
+        years = today.year - y - ((today.month, today.day) < (m, d))
+        return max(0, years)
+    except Exception:
+        return None
+
+GENDER_PATTERNS = [
+    (re.compile(r"\b(female|f/o|f )\b", re.I), "female"),
+    (re.compile(r"\b(male|m/o|m )\b", re.I), "male"),
+    (re.compile(r"મહિલા|સ્ત્રી"), "female"),
+    (re.compile(r"પુરુષ"), "male"),
+]
+
+def detect_gender(*texts: Optional[str]) -> Optional[str]:
+    blob = " ".join([t for t in texts if t]).strip()
+    if not blob:
+        return None
+    for pat, g in GENDER_PATTERNS:
+        if pat.search(blob):
+            return g
+    return None
+
 # ---------- OCR via GPT Vision ----------
 
 OCR_SYSTEM_PROMPT = """You are an OCR and document verification assistant for Indian government documents (Aadhaar Card, PAN Card, Voter ID / EPIC, Passport, Birth Certificate, School Leaving Certificate / LC). The image may contain English and Gujarati text.
@@ -192,6 +230,7 @@ Return ONLY a valid JSON object (no markdown fences) with these keys:
   "doc_number": "The document number (Aadhaar 12-digit, PAN 10-char, EPIC, Passport, etc.) or null",
   "father_name": "Father/guardian name if printed, else null",
   "mother_name": "Mother's name if printed (especially on Birth Certificates), else null",
+  "gender": "One of 'male' | 'female' | 'other' based on text such as 'Male', 'Female', 'M', 'F', 'પુરુષ', 'મહિલા', 'સ્ત્રી'; else null",
   "headers_found": ["list of distinctive headers/issuer text you actually read, e.g. 'Government of India', 'Income Tax Department', 'Election Commission of India', 'Unique Identification Authority of India', 'Republic of India', 'School Leaving Certificate', 'Birth Certificate'"]
 }
 
@@ -340,6 +379,25 @@ async def save_document(payload: DocumentIn, user=Depends(current_user)):
     await db.documents.delete_many({"user_id": user["id"], "doc_type": payload.doc_type})
     await db.documents.insert_one(doc.copy())
     doc.pop("_id", None)
+
+    # ---------- AUTO DETECT age / gender / minor when saving the BASE document ----------
+    profile = await db.profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
+    base_type = profile.get("base_doc_type")
+    if base_type and payload.doc_type == base_type:
+        age = calc_age(payload.dob)
+        gender = (payload.gender or "").lower() or detect_gender(payload.name, payload.first_name)
+        if gender not in {"male", "female", "other"}:
+            gender = None
+        is_minor = bool(age is not None and age < 18)
+        update = {
+            "detected_age": age,
+            "detected_gender": gender,
+            "is_minor": is_minor,
+        }
+        # Minor and married_lady are mutually exclusive; minor wins if both true.
+        if is_minor:
+            update["is_married_lady"] = False
+        await db.profiles.update_one({"user_id": user["id"]}, {"$set": update}, upsert=True)
     return DocumentOut(**doc)
 
 @api.delete("/documents/{doc_type}")
@@ -347,6 +405,31 @@ async def delete_document(doc_type: str, user=Depends(current_user)):
     if doc_type not in ALLOWED_DOC_TYPES:
         raise HTTPException(status_code=400, detail="Unknown doc_type")
     await db.documents.delete_many({"user_id": user["id"], "doc_type": doc_type})
+    # If user deleted their base document, also wipe auto-detected attributes
+    profile = await db.profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
+    if profile.get("base_doc_type") == doc_type:
+        await db.profiles.update_one(
+            {"user_id": user["id"]},
+            {"$set": {"detected_age": None, "detected_gender": None, "is_minor": False}},
+        )
+    return {"ok": True}
+
+@api.post("/profile/reset")
+async def profile_reset(user=Depends(current_user)):
+    """Wipe all uploaded documents and reset toggles. Used when the user
+    confirms changing their Base Document."""
+    await db.documents.delete_many({"user_id": user["id"]})
+    await db.profiles.update_one(
+        {"user_id": user["id"]},
+        {"$set": {
+            "base_doc_type": None,
+            "is_married_lady": False,
+            "is_minor": False,
+            "detected_age": None,
+            "detected_gender": None,
+        }},
+        upsert=True,
+    )
     return {"ok": True}
 
 # ---------- OCR ----------
@@ -375,6 +458,7 @@ async def ocr_extract(payload: OcrIn, user=Depends(current_user)):
         mother_name=data.get("mother_name"),
         surname=data.get("surname"),
         first_name=data.get("first_name"),
+        gender=(data.get("gender") or "").lower() or None,
     )
     return OcrOut(
         detected_type=detected,
@@ -430,7 +514,9 @@ async def verify_roadmap(user=Depends(current_user)):
     if is_minor:
         father = _doc_by_type(docs, "father_aadhaar")
         mother = _doc_by_type(docs, "mother_aadhaar")
-        needs_father = not father
+        # Single-parent flexibility: at least ONE parent's Aadhaar is required.
+        needs_any_parent = (not father) and (not mother)
+        needs_father = not father  # for UI hints only
         needs_mother = not mother
         if base_type != "birth":
             step("Use Birth Certificate as Base",
@@ -464,18 +550,12 @@ async def verify_roadmap(user=Depends(current_user)):
             mother_ok = names_match(birth_mother, mother.get("name"))
             statuses["mother_aadhaar"] = "match" if mother_ok else "mismatch"
 
-        if needs_father:
-            step("Upload Father's Aadhaar (mandatory)",
-                 "પિતાનું આધાર ઉમેરો (ફરજિયાત)",
-                 "Minor's Aadhaar correction requires the Father's Aadhaar Card. Please scan or enter it.",
-                 "બાળકના આધાર સુધારા માટે પિતાનું આધાર કાર્ડ ફરજિયાત છે. મહેરબાની કરીને સ્કેન કરો અથવા દાખલ કરો.",
+        if needs_any_parent:
+            step("Upload at least one Parent's Aadhaar (mandatory)",
+                 "ઓછામાં ઓછું એક માતા-પિતાનું આધાર ઉમેરો (ફરજિયાત)",
+                 "For minor cases at least one parent's Aadhaar (Father OR Mother) is required.",
+                 "Minor કેસ માટે પિતા અથવા માતા — ઓછામાં ઓછું એક આધાર ઉમેરવું ફરજિયાત છે.",
                  doc_type="father_aadhaar")
-        if needs_mother:
-            step("Upload Mother's Aadhaar (mandatory)",
-                 "માતાનું આધાર ઉમેરો (ફરજિયાત)",
-                 "Minor's Aadhaar correction requires the Mother's Aadhaar Card. Please scan or enter it.",
-                 "બાળકના આધાર સુધારા માટે માતાનું આધાર કાર્ડ ફરજિયાત છે. મહેરબાની કરીને સ્કેન કરો અથવા દાખલ કરો.",
-                 doc_type="mother_aadhaar")
         if father and birth_father and statuses["father_aadhaar"] == "mismatch":
             issues.append({
                 "code": "minor_father_name_mismatch",
@@ -500,8 +580,9 @@ async def verify_roadmap(user=Depends(current_user)):
                  doc_type="mother_aadhaar")
 
         ready_to_correct_minor = (
-            base_doc is not None and not needs_father and not needs_mother and
-            statuses.get("father_aadhaar") == "match" and statuses.get("mother_aadhaar") == "match"
+            base_doc is not None and not needs_any_parent and
+            (not father or statuses.get("father_aadhaar") == "match") and
+            (not mother or statuses.get("mother_aadhaar") == "match")
         )
         if ready_to_correct_minor:
             step("Correct Minor's Aadhaar Card",
@@ -720,14 +801,14 @@ async def expert_book(payload: BookingIn, user=Depends(current_user)):
         raise HTTPException(status_code=400, detail="mode must be audio or video")
     profile = await db.profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
     if profile.get("is_minor"):
-        # Both parent aadhaars are mandatory for minor case
+        # Single-parent flexibility: at least ONE parent's Aadhaar is required.
         father = await db.documents.find_one({"user_id": user["id"], "doc_type": "father_aadhaar"}, {"_id": 0})
         mother = await db.documents.find_one({"user_id": user["id"], "doc_type": "mother_aadhaar"}, {"_id": 0})
-        if not father or not mother:
+        if not father and not mother:
             raise HTTPException(
                 status_code=400,
-                detail="Minor case requires both Father's Aadhaar and Mother's Aadhaar before booking. "
-                       "Minor (બાળક) કેસ માટે પિતા અને માતા બંનેનું આધાર ઉમેરવું ફરજિયાત છે.",
+                detail="Minor case requires at least one parent's Aadhaar (Father OR Mother) before booking. "
+                       "Minor (બાળક) કેસ માટે પિતા અથવા માતા — ઓછામાં ઓછું એક આધાર ઉમેરવું ફરજિયાત છે.",
             )
     booking = {
         "id": str(uuid.uuid4()),

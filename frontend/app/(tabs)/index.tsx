@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 
 import { useApp } from "@/src/store";
-import { t, Lang } from "@/src/i18n";
+import { t, StringKey } from "@/src/i18n";
 import { colors, radius, spacing, typeScale } from "@/src/theme";
 
 type RoadmapStep = {
@@ -41,11 +42,18 @@ const BASE_OPTIONS = ["birth", "lc", "passport", "aadhaar"] as const;
 const ALL_DOC_CARDS = ["aadhaar", "pan", "voter_id", "passport"] as const;
 
 export default function Dashboard() {
-  const { api, lang, profile, refresh } = useApp();
+  const { api, lang, profile, documents, refresh } = useApp();
   const router = useRouter();
   const [road, setRoad] = useState<RoadmapResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingToggle, setSavingToggle] = useState(false);
+  const [confirmTo, setConfirmTo] = useState<string | null>(null); // pending base doc to switch to
+
+  const baseDoc = documents.find((d) => d.doc_type === profile?.base_doc_type);
+  const baseDataExists = !!baseDoc && (!!baseDoc.name || !!baseDoc.dob);
+  const isMinor = !!profile?.is_minor;
+  const isAdult = (profile?.detected_age ?? 99) >= 18;
+  const isFemaleAdult = profile?.detected_gender === "female" && isAdult;
 
   const loadRoadmap = useCallback(async () => {
     setLoading(true);
@@ -68,7 +76,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadRoadmap();
-  }, [profile?.base_doc_type, profile?.is_married_lady, loadRoadmap]);
+  }, [profile?.base_doc_type, profile?.is_married_lady, profile?.is_minor, loadRoadmap]);
 
   const updateProfile = async (patch: Record<string, unknown>) => {
     try {
@@ -80,9 +88,34 @@ export default function Dashboard() {
     }
   };
 
-  const onPickBase = async (b: string) => {
+  const applyBaseChoice = async (b: string) => {
     Haptics.selectionAsync().catch(() => {});
     await updateProfile({ base_doc_type: b });
+  };
+
+  const onPickBase = async (b: string) => {
+    if (b === profile?.base_doc_type) return;
+    // If data exists, ask for confirmation
+    const hasAnyData = documents.length > 0;
+    if (profile?.base_doc_type && hasAnyData) {
+      setConfirmTo(b);
+      return;
+    }
+    await applyBaseChoice(b);
+  };
+
+  const confirmChange = async () => {
+    if (!confirmTo) return;
+    const target = confirmTo;
+    setConfirmTo(null);
+    try {
+      await api("/api/profile/reset", { method: "POST" });
+      await api("/api/profile/state", { method: "PUT", body: JSON.stringify({ base_doc_type: target }) });
+      await refresh();
+      await loadRoadmap();
+    } catch (e) {
+      console.warn(e);
+    }
   };
 
   const onToggleML = async (val: boolean) => {
@@ -120,88 +153,120 @@ export default function Dashboard() {
                   style={[styles.baseChip, active && styles.baseChipActive]}
                 >
                   <Text style={[styles.baseChipText, active && styles.baseChipTextActive]} numberOfLines={2}>
-                    {t(lang, opt as any)}
+                    {t(lang, opt as StringKey)}
                   </Text>
                 </Pressable>
               );
             })}
           </View>
+          {profile?.base_doc_type ? (
+            <Pressable
+              testID="add-base-doc-btn"
+              style={[styles.baseAddBtn, baseDataExists && styles.baseAddBtnDone]}
+              onPress={() => router.push(`/scan/${profile.base_doc_type}` as any)}
+            >
+              <Ionicons
+                name={baseDataExists ? "checkmark-circle" : "add-circle"}
+                size={20}
+                color={baseDataExists ? colors.success : colors.brand}
+              />
+              <Text style={[styles.baseAddBtnText, baseDataExists && { color: colors.success }]}>
+                {baseDataExists ? `${t(lang, profile.base_doc_type as StringKey)} ✓` : t(lang, "add_base_doc_now")}
+              </Text>
+            </Pressable>
+          ) : null}
+          {profile?.detected_age != null ? (
+            <View style={styles.detectChip} testID="detected-info-chip">
+              <Ionicons name="information-circle" size={16} color={colors.brand} />
+              <Text style={styles.detectText}>
+                Age {profile.detected_age}
+                {profile.detected_gender ? ` • ${t(lang, ("gender_" + profile.detected_gender) as StringKey)}` : ""}
+                {isMinor ? ` • Minor` : ""}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
-        {/* Married Lady Toggle */}
-        <View style={styles.toggleCard}>
-          <View style={{ flex: 1, paddingRight: spacing.md }}>
-            <Text style={styles.toggleTitle}>{t(lang, "married_lady_toggle")}</Text>
-            <Text style={styles.toggleHint}>{t(lang, "married_lady_hint")}</Text>
+        {/* Married Lady Toggle (conditional) */}
+        {!isMinor && isFemaleAdult ? (
+          <View style={styles.toggleCard}>
+            <View style={{ flex: 1, paddingRight: spacing.md }}>
+              <Text style={styles.toggleTitle}>{t(lang, "married_lady_toggle")}</Text>
+              <Text style={styles.toggleHint}>{t(lang, "married_lady_hint")}</Text>
+            </View>
+            <Switch
+              testID="married-lady-toggle"
+              value={!!profile?.is_married_lady}
+              onValueChange={onToggleML}
+              disabled={savingToggle}
+              trackColor={{ false: colors.borderStrong, true: colors.brandSecondary }}
+              thumbColor={profile?.is_married_lady ? colors.brand : "#FFF"}
+            />
           </View>
-          <Switch
-            testID="married-lady-toggle"
-            value={!!profile?.is_married_lady}
-            onValueChange={onToggleML}
-            disabled={savingToggle || !!profile?.is_minor}
-            trackColor={{ false: colors.borderStrong, true: colors.brandSecondary }}
-            thumbColor={profile?.is_married_lady ? colors.brand : "#FFF"}
-          />
-        </View>
+        ) : null}
 
-        {/* Minor Toggle */}
-        <View style={styles.toggleCard}>
-          <View style={{ flex: 1, paddingRight: spacing.md }}>
-            <Text style={styles.toggleTitle}>{t(lang, "minor_toggle")}</Text>
-            <Text style={styles.toggleHint}>{t(lang, "minor_hint")}</Text>
+        {/* Auto-Minor banner */}
+        {isMinor ? (
+          <View style={styles.minorBanner} testID="auto-minor-banner">
+            <Ionicons name="happy" size={20} color="#7A4F00" />
+            <Text style={styles.warnText}>{t(lang, "auto_minor_banner")}</Text>
           </View>
-          <Switch
-            testID="minor-toggle"
-            value={!!profile?.is_minor}
-            onValueChange={async (val) => {
-              setSavingToggle(true);
-              await updateProfile({ is_minor: val });
-              setSavingToggle(false);
-            }}
-            disabled={savingToggle || !!profile?.is_married_lady}
-            trackColor={{ false: colors.borderStrong, true: colors.brandSecondary }}
-            thumbColor={profile?.is_minor ? colors.brand : "#FFF"}
-          />
-        </View>
+        ) : null}
 
-        {!profile?.base_doc_type ? (
-          <View style={styles.noticeCard}>
-            <Ionicons name="information-circle" size={20} color={colors.warning} />
-            <Text style={styles.noticeText}>{t(lang, "no_base_doc")}</Text>
+        {/* Locked state when no base doc data yet */}
+        {!baseDataExists ? (
+          <View style={styles.lockCard} testID="base-lock-card">
+            <Ionicons name="lock-closed" size={24} color={colors.warning} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.lockTitle}>{t(lang, "base_locked_title")}</Text>
+              <Text style={styles.lockBody}>{t(lang, "base_locked_body")}</Text>
+            </View>
+            {profile?.base_doc_type ? (
+              <Pressable
+                testID="lock-add-btn"
+                style={styles.lockCta}
+                onPress={() => router.push(`/scan/${profile.base_doc_type}` as any)}
+              >
+                <Text style={styles.lockCtaText}>{t(lang, "add_doc")}</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 
         {/* Document Cards */}
         <Text style={styles.h2}>{t(lang, "documents")}</Text>
-        {profile?.is_minor && profile?.base_doc_type !== "birth" ? (
-          <View style={styles.noticeCard}>
-            <Ionicons name="warning" size={20} color={colors.warning} />
-            <Text style={styles.noticeText}>{t(lang, "minor_only_birth")}</Text>
-          </View>
-        ) : null}
         <View style={styles.cardGrid}>
           {ALL_DOC_CARDS.filter((d) => d !== profile?.base_doc_type).map((d) => {
             const status = road?.statuses?.[d] || "pending";
             const colorStyle = status === "match" ? styles.pillMatch : status === "mismatch" ? styles.pillMismatch : styles.pillPending;
             const label = status === "match" ? t(lang, "status_match") : status === "mismatch" ? t(lang, "status_mismatch") : t(lang, "status_pending");
+            const locked = !baseDataExists;
             return (
               <Pressable
                 key={d}
                 testID={`doc-card-${d}`}
-                style={styles.docCard}
-                onPress={() => router.push(`/scan/${d}` as any)}
+                style={[styles.docCard, locked && styles.docCardLocked]}
+                onPress={() => {
+                  if (locked) {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                    return;
+                  }
+                  router.push(`/scan/${d}` as any);
+                }}
               >
                 <View style={styles.docIconWrap}>
-                  <Ionicons name="card" size={22} color={colors.brand} />
+                  <Ionicons name={locked ? "lock-closed" : "card"} size={22} color={locked ? colors.muted : colors.brand} />
                 </View>
-                <Text style={styles.docTitle}>{t(lang, d as any)}</Text>
-                <View style={[styles.pill, colorStyle]}>
-                  <Text style={styles.pillText}>{label}</Text>
-                </View>
+                <Text style={[styles.docTitle, locked && { color: colors.muted }]}>{t(lang, d as StringKey)}</Text>
+                {!locked ? (
+                  <View style={[styles.pill, colorStyle]}>
+                    <Text style={styles.pillText}>{label}</Text>
+                  </View>
+                ) : null}
               </Pressable>
             );
           })}
-          {road?.needs_husband_aadhaar ? (
+          {road?.needs_husband_aadhaar && baseDataExists ? (
             <Pressable
               testID="doc-card-husband_aadhaar"
               style={[styles.docCard, { borderColor: colors.warning, borderWidth: 1 }]}
@@ -216,60 +281,29 @@ export default function Dashboard() {
               </View>
             </Pressable>
           ) : null}
-          {profile?.is_minor ? (
+          {isMinor && baseDataExists ? (
             <>
-              <Pressable
-                testID="doc-card-father_aadhaar"
-                style={[styles.docCard, { borderColor: colors.warning, borderWidth: 1 }]}
-                onPress={() => router.push(`/scan/father_aadhaar` as any)}
-              >
-                <View style={styles.docIconWrap}>
-                  <Ionicons name="man" size={22} color={colors.brand} />
-                </View>
-                <Text style={styles.docTitle}>{t(lang, "father_aadhaar")}</Text>
-                <View style={[
-                  styles.pill,
-                  road?.statuses?.father_aadhaar === "match"
-                    ? styles.pillMatch
-                    : road?.statuses?.father_aadhaar === "mismatch"
-                    ? styles.pillMismatch
-                    : styles.pillPending,
-                ]}>
-                  <Text style={styles.pillText}>
-                    {road?.statuses?.father_aadhaar === "match"
-                      ? t(lang, "status_match")
-                      : road?.statuses?.father_aadhaar === "mismatch"
-                      ? t(lang, "status_mismatch")
-                      : t(lang, "status_pending")}
-                  </Text>
-                </View>
-              </Pressable>
-              <Pressable
-                testID="doc-card-mother_aadhaar"
-                style={[styles.docCard, { borderColor: colors.warning, borderWidth: 1 }]}
-                onPress={() => router.push(`/scan/mother_aadhaar` as any)}
-              >
-                <View style={styles.docIconWrap}>
-                  <Ionicons name="woman" size={22} color={colors.brand} />
-                </View>
-                <Text style={styles.docTitle}>{t(lang, "mother_aadhaar")}</Text>
-                <View style={[
-                  styles.pill,
-                  road?.statuses?.mother_aadhaar === "match"
-                    ? styles.pillMatch
-                    : road?.statuses?.mother_aadhaar === "mismatch"
-                    ? styles.pillMismatch
-                    : styles.pillPending,
-                ]}>
-                  <Text style={styles.pillText}>
-                    {road?.statuses?.mother_aadhaar === "match"
-                      ? t(lang, "status_match")
-                      : road?.statuses?.mother_aadhaar === "mismatch"
-                      ? t(lang, "status_mismatch")
-                      : t(lang, "status_pending")}
-                  </Text>
-                </View>
-              </Pressable>
+              {(["father_aadhaar", "mother_aadhaar"] as const).map((k) => {
+                const s = road?.statuses?.[k];
+                const pillStyle = s === "match" ? styles.pillMatch : s === "mismatch" ? styles.pillMismatch : styles.pillPending;
+                const pillLabel = s === "match" ? t(lang, "status_match") : s === "mismatch" ? t(lang, "status_mismatch") : t(lang, "status_pending");
+                return (
+                  <Pressable
+                    key={k}
+                    testID={`doc-card-${k}`}
+                    style={[styles.docCard, { borderColor: colors.warning, borderWidth: 1 }]}
+                    onPress={() => router.push(`/scan/${k}` as any)}
+                  >
+                    <View style={styles.docIconWrap}>
+                      <Ionicons name={k === "father_aadhaar" ? "man" : "woman"} size={22} color={colors.brand} />
+                    </View>
+                    <Text style={styles.docTitle}>{t(lang, k as StringKey)}</Text>
+                    <View style={[styles.pill, pillStyle]}>
+                      <Text style={styles.pillText}>{pillLabel}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
             </>
           ) : null}
         </View>
@@ -315,6 +349,40 @@ export default function Dashboard() {
 
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
+
+      {/* Base Document Change Confirmation */}
+      <Modal
+        visible={!!confirmTo}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmTo(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="alert-circle" size={32} color={colors.warning} />
+            </View>
+            <Text style={styles.modalTitle}>{t(lang, "change_base_title")}</Text>
+            <Text style={styles.modalBody}>{t(lang, "change_base_body")}</Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                testID="confirm-base-no-btn"
+                style={[styles.modalBtn, styles.modalBtnSecondary]}
+                onPress={() => setConfirmTo(null)}
+              >
+                <Text style={styles.modalBtnSecondaryText}>{t(lang, "no")}</Text>
+              </Pressable>
+              <Pressable
+                testID="confirm-base-yes-btn"
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={confirmChange}
+              >
+                <Text style={styles.modalBtnPrimaryText}>{t(lang, "yes")}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -361,6 +429,20 @@ const styles = StyleSheet.create({
   baseChipActive: { backgroundColor: colors.brandTertiary, borderColor: colors.brand },
   baseChipText: { fontSize: typeScale.sm, color: colors.onSurfaceTertiary, fontWeight: "600", textAlign: "center" },
   baseChipTextActive: { color: colors.brand },
+  baseAddBtn: {
+    marginTop: spacing.sm,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
+    paddingVertical: spacing.md, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.brand, backgroundColor: colors.brandTertiary,
+  },
+  baseAddBtnDone: { borderColor: colors.success, backgroundColor: "#E6F4EA" },
+  baseAddBtnText: { color: colors.brand, fontWeight: "700", fontSize: typeScale.base },
+  detectChip: {
+    flexDirection: "row", alignSelf: "flex-start", alignItems: "center", gap: 6,
+    paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill,
+    backgroundColor: colors.brandTertiary, marginTop: spacing.sm,
+  },
+  detectText: { color: colors.brand, fontWeight: "700", fontSize: typeScale.sm },
   toggleCard: {
     flexDirection: "row",
     backgroundColor: colors.surfaceSecondary,
@@ -372,7 +454,7 @@ const styles = StyleSheet.create({
   },
   toggleTitle: { fontSize: typeScale.base, fontWeight: "700", color: colors.onSurface },
   toggleHint: { fontSize: typeScale.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
-  noticeCard: {
+  minorBanner: {
     flexDirection: "row",
     gap: spacing.sm,
     padding: spacing.md,
@@ -381,7 +463,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#FFE0A3",
   },
-  noticeText: { flex: 1, color: "#7A4F00", fontSize: typeScale.sm },
+  warnText: { flex: 1, color: "#7A4F00", fontWeight: "600", fontSize: typeScale.sm, lineHeight: 20 },
+  lockCard: {
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    alignItems: "center",
+  },
+  lockTitle: { fontSize: typeScale.base, fontWeight: "700", color: colors.onSurface },
+  lockBody: { fontSize: typeScale.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  lockCta: {
+    backgroundColor: colors.brand, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill,
+  },
+  lockCtaText: { color: "#FFF", fontWeight: "700" },
   h2: { fontSize: typeScale.lg, fontWeight: "700", color: colors.onSurface, marginTop: spacing.sm },
   cardGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   docCard: {
@@ -393,6 +491,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     gap: spacing.sm,
   },
+  docCardLocked: { opacity: 0.55, borderStyle: "dashed" },
   docIconWrap: {
     width: 40,
     height: 40,
@@ -435,4 +534,21 @@ const styles = StyleSheet.create({
   },
   expertTitle: { color: "#FFF", fontSize: typeScale.base, fontWeight: "700", marginBottom: 2 },
   expertPrice: { color: "#E8F0EA", fontSize: typeScale.sm, fontWeight: "600" },
+  modalOverlay: {
+    flex: 1, backgroundColor: colors.overlay,
+    justifyContent: "center", padding: spacing.xl,
+  },
+  modalCard: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.lg, padding: spacing.xl, gap: spacing.sm,
+  },
+  modalIconWrap: { alignSelf: "center", marginBottom: spacing.sm },
+  modalTitle: { fontSize: typeScale.xl, fontWeight: "800", color: colors.onSurface, textAlign: "center" },
+  modalBody: { fontSize: typeScale.base, color: colors.onSurfaceTertiary, textAlign: "center", lineHeight: 22 },
+  modalActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
+  modalBtn: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: "center" },
+  modalBtnSecondary: { backgroundColor: colors.surfaceTertiary },
+  modalBtnSecondaryText: { color: colors.onSurface, fontWeight: "700", fontSize: typeScale.base },
+  modalBtnPrimary: { backgroundColor: colors.error },
+  modalBtnPrimaryText: { color: "#FFF", fontWeight: "700", fontSize: typeScale.base },
 });
